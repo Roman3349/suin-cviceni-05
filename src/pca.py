@@ -9,6 +9,8 @@ a pozdeji znovu pouzit.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 
@@ -78,13 +80,13 @@ class PCA:
         Delitel ``m - 1`` odpovida vyberovemu (nevychylenemu) odhadu rozptylu
         a shoduje se s ``np.cov(x, rowvar=False)``.
         """
-        # assert  Overte, ze x je typu np.ndarray.
-        # assert  Overte, ze x ma 2 rozmery (matice vzorky x priznaky).
-        # assert  Overte, ze x obsahuje alespon 2 vzorky (m >= 2).
-        raise NotImplementedError(
-            "Úkol: spoctete kovariancni matici (n_features x n_features) "
-            "vektorizovane — vycentrujte sloupce a vratte (xc.T @ xc) / (m - 1)."
-        )
+        assert isinstance(x, np.ndarray), "x musí být np.ndarray"
+        assert x.ndim == 2, "x musí být 2D pole"
+        assert x.shape[0] >= 2, "x musí obsahovat alespoň 2 vzorky"
+        assert x.shape[1] >= 1, "x musí obsahovat alespoň jeden příznak"
+
+        xc = x - x.mean(axis=0)
+        return (xc.T @ xc) / (x.shape[0] - 1)
 
     def _select_components(self, eigenvalues: np.ndarray) -> int:
         """Urci pocet komponent podle prahu kumulativniho rozptylu.
@@ -106,13 +108,25 @@ class PCA:
         NEJMENSI. Znamenko odpovidajiciho vlastniho vektoru pritom nehraje
         roli, do vyberu vstupuje jen velikost vlastniho cisla.
         """
-        # assert  Overte, ze eigenvalues je 1D np.ndarray.
-        # assert  Overte, ze eigenvalues jsou serazena sestupne.
-        # assert  Overte, ze 0 < self.variance_threshold <= 100.
-        raise NotImplementedError(
-            "Úkol: vratte nejmensi pocet komponent, jejichz kumulativni "
-            "vysvetleny rozptyl dosahne self.variance_threshold procent."
-        )
+        assert isinstance(eigenvalues, np.ndarray), "eigenvalues musí být np.ndarray"
+        assert eigenvalues.ndim == 1, "eigenvalues musí být 1D pole"
+        assert eigenvalues.size > 0, "eigenvalues nesmí být prázdné"
+        assert np.all(eigenvalues[:-1] >= eigenvalues[1:]), "eigenvalues musí být seřazena sestupně"
+        assert (
+                self.variance_threshold is not None
+                and 0 < self.variance_threshold <= 100
+        ), "variance_threshold musí být v intervalu (0, 100]"
+
+        total = eigenvalues.sum()
+        assert total > 0, "Součet vlastních čísel musí být kladný"
+
+        ratios = eigenvalues / total
+        cumulative = np.cumsum(ratios)
+        n_components = np.searchsorted(
+            cumulative, self.variance_threshold / 100, side="left"
+        ) + 1
+
+        return min(n_components, eigenvalues.size)
 
     def fit(self, x: np.ndarray) -> "PCA":
         """Nauci PCA model z trenovacich dat ``x``.
@@ -186,12 +200,10 @@ class PCA:
         jednotlivych sloupcu vysledku lisit od jine implementace (napr.
         sklearn) — to je v poradku.
         """
-        # assert  Overte, ze model je naucen (self.components_ neni None).
-        # assert  Overte, ze X.shape[1] == self.mean_.shape[0].
-        raise NotImplementedError(
-            "Úkol: promitnete vycentrovana data na self.components_, "
-            "tedy vratte (X - self.mean_) @ self.components_."
-        )
+        assert self.components_ is not None, "model není naučen"
+        assert x.shape[1] == self.mean_.shape[0]
+
+        return (x - self.mean_) @ self.components_
 
     def inverse_transform(self, x_pca: np.ndarray) -> np.ndarray:
         """Rekonstruuje data z prostoru hlavnich komponent zpet do puvodniho.
@@ -209,12 +221,10 @@ class PCA:
         ``inverse_transform(transform(X)) ~= X`` az na numerickou chybu; pri
         redukci poctu komponent je rekonstrukce ztratova.
         """
-        # assert  Overte, ze model je naucen (self.components_ neni None).
-        # assert  Overte, ze X_pca.shape[1] == self.n_components_.
-        raise NotImplementedError(
-            "Úkol: rekonstruujte data zpet do puvodniho prostoru, "
-            "tedy vratte X_pca @ self.components_.T + self.mean_."
-        )
+        assert self.components_ is not None, "model není naučen"
+        assert x_pca.shape[1] == self.n_components_, "Počet komponent neodpovídá naučenému modelu"
+
+        return x_pca @ self.components_.T + self.mean_
 
     def save(self, path: str) -> None:
         """Ulozi naucený model do souboru ``.npz`` pomoci ``np.savez``.
@@ -241,9 +251,20 @@ class PCA:
         Format ``.npz`` uklada jen ciselna pole.
         """
         # assert  Overte, ze model je naucen (self.components_ neni None).
-        raise NotImplementedError(
-            "Úkol: ulozte naucena pole modelu do souboru .npz pomoci np.savez "
-            "(minimalne components_ a mean_, plus dalsi pole pro obnovu stavu)."
+        assert self.components_ is not None, "model není naučen"
+
+        np.savez(
+            path,
+            components_=self.components_,
+            mean_=self.mean_,
+            eigenvalues_=self.eigenvalues_,
+            explained_variance_ratio_=self.explained_variance_ratio_,
+            n_components_=np.array(self.n_components_),
+            variance_threshold_=np.array(
+                np.nan if self.variance_threshold is None
+                else self.variance_threshold
+            ),
+            n_components_param_=np.array(-1 if self.n_components is None else self.n_components),
         )
 
     # @classmethod: metoda dostane misto instance (self) samotnou tridu (cls).
@@ -270,9 +291,52 @@ class PCA:
         Transduktivni shlukovani z cv4 zadny takový znovupouzitelny model nema,
         proto tam obdoba ``load`` neexistuje.
         """
-        # assert  Overte, ze soubor path existuje a obsahuje pole 'components_' a 'mean_'.
-        # assert  Overte, ze obnovene components_ maji 2 rozmery.
-        raise NotImplementedError(
-            "Úkol: nactete pole ze souboru .npz, vytvorte novou instanci PCA, "
-            "obnovte jeji naucene atributy a vratte ji."
-        )
+        assert Path(path).is_file(), f"Soubor {path} neexistuje"
+
+        with np.load(path, allow_pickle=False) as data:
+            assert "components_" in data and "mean_" in data, "Soubor musí obsahovat components_ a mean_"
+
+            components = data["components_"]
+            mean = data["mean_"]
+
+            assert components.ndim == 2, "components_ musí být 2D pole"
+            assert mean.ndim == 1, "mean_ musí být 1D pole"
+            assert components.shape[0] == mean.shape[0], "Nekompatibilní rozměry components_ a mean_"
+
+            variance_threshold = (
+                float(data["variance_threshold_"])
+                if "variance_threshold_" in data
+                else 95.0
+            )
+            if np.isnan(variance_threshold):
+                variance_threshold = None
+
+            n_components_param = (
+                int(data["n_components_param_"])
+                if "n_components_param_" in data
+                else -1
+            )
+            if n_components_param == -1:
+                n_components_param = None
+
+            model = cls(
+                variance_threshold=variance_threshold,
+                n_components=n_components_param,
+            )
+
+            model.components_ = components.copy()
+            model.mean_ = mean.copy()
+            model.n_components_ = components.shape[1]
+
+            model.eigenvalues_ = (
+                data["eigenvalues_"].copy()
+                if "eigenvalues_" in data
+                else None
+            )
+            model.explained_variance_ratio_ = (
+                data["explained_variance_ratio_"].copy()
+                if "explained_variance_ratio_" in data
+                else None
+            )
+
+        return model

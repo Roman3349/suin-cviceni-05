@@ -121,14 +121,35 @@ class FilterSelector(FeatureSelector):
         np.ndarray
             Celociselne indexy ponechanych priznaku.
         """
-        # assert  Ověřte, že X je 2D pole (X.ndim == 2)
-        # assert  Ověřte, že len(y) == X.shape[0]
-        # assert  Ověřte, že y je binarni (mnozina hodnot je podmnozinou {0, 1})
-        raise NotImplementedError(
-            "Úkol: implementujte filtrovaci vyber priznaku dvojkriteriem "
-            "vyznamnost (p < alpha) A velikost ucinku (|d| >= min_effect_size); "
-            "viz docstring."
-        )
+        assert isinstance(x, np.ndarray), "x musí být np.ndarray"
+        assert x.ndim == 2, "x musí být 2D pole"
+        assert len(y) == x.shape[0], "Počet cílových hodnot musí odpovídat počtu vzorků"
+        assert set(np.unique(y)).issubset({0, 1}), "y musí obsahovat pouze hodnoty 0 a 1"
+        assert len(np.unique(y)) == 2, "y musí obsahovat obě třídy 0 a 1"
+
+        selected = []
+
+        for j in range(x.shape[1]):
+            a = x[y == 0, j]
+            b = x[y == 1, j]
+
+            if len(a) < 3 or len(b) < 3:
+                continue
+
+            p_shapiro_a = stats.shapiro(a).pvalue
+            p_shapiro_b = stats.shapiro(b).pvalue
+
+            if p_shapiro_a > self.alpha and p_shapiro_b > self.alpha:
+                p = stats.ttest_ind(a, b, equal_var=True).pvalue
+            else:
+                p = stats.mannwhitneyu(a, b, alternative="two-sided").pvalue
+
+            d = self._cohens_d(a, b)
+
+            if p < self.alpha and abs(d) >= self.min_effect_size:
+                selected.append(j)
+
+        return np.array(selected, dtype=int)
 
     def _cohens_d(self, a: np.ndarray, b: np.ndarray) -> float:
         """Vrati Cohenovo ``d`` — velikost ucinku pro dva nezavisle vybery.
@@ -296,14 +317,19 @@ class SilhouetteWrapperSelector(WrapperSelector):
         float
             Prumerna silueta (v intervalu ``[-1, 1]``).
         """
-        # assert  Ověřte, že X_subset je 2D pole (X_subset.ndim == 2)
-        # assert  Ověřte, že X_subset.shape[0] > self.n_clusters
-        raise NotImplementedError(
-            "Úkol: implementujte siluetove skore — nafitujte KMeans na "
-            "X_subset a vratte silhouette_score(X_subset, labels); "
-            "viz docstring."
+        assert isinstance(x_subset, np.ndarray), "x_subset musí být np.ndarray"
+        assert x_subset.ndim == 2, "x_subset musí být 2D pole"
+        assert x_subset.shape[0] > self.n_clusters, "Počet vzorků musí být větší než počet shluků"
+
+        kmeans = KMeans(
+            n_clusters=self.n_clusters,
+            random_state=self.random_state,
+            n_init=10,
         )
 
+        labels = kmeans.fit_predict(x_subset)
+
+        return float(silhouette_score(x_subset, labels))
 
 class KNNWrapperSelector(WrapperSelector):
     """Wrapper skorujici podmnozinu priznaku testovaci presnosti kNN.
@@ -366,11 +392,20 @@ class KNNWrapperSelector(WrapperSelector):
         float
             Podil spravne klasifikovanych testovacich vzorku (``[0, 1]``).
         """
-        # assert  Ověřte, že X_subset je 2D pole (X_subset.ndim == 2)
-        # assert  Ověřte, že len(y) == X_subset.shape[0]
-        # assert  Ověřte, že y obsahuje aspon 2 tridy
-        raise NotImplementedError(
-            "Úkol: implementujte skore jako testovaci presnost kNN — "
-            "train_test_split, fit KNeighborsClassifier, vratte clf.score; "
-            "viz docstring."
+        assert isinstance(x_subset, np.ndarray), "x_subset musí být np.ndarray"
+        assert x_subset.ndim == 2, "x_subset musí být 2D pole"
+        assert len(y) == x_subset.shape[0], "Počet cílových hodnot musí odpovídat počtu vzorků"
+        assert len(np.unique(y)) >= 2, "y musí obsahovat alespoň 2 třídy"
+
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            x_subset,
+            y,
+            test_size=self.test_size,
+            random_state=self.random_state,
+            stratify=y,
         )
+
+        clf = KNeighborsClassifier(n_neighbors=self.n_neighbors)
+        clf.fit(X_tr, y_tr)
+
+        return float(clf.score(X_te, y_te))
